@@ -249,18 +249,7 @@
     <div class="setting-row">
       <span class="setting-label">音色</span>
       <select class="voice-select" id="voice-select" onchange="updateVoice(this.value)">
-        <option value="">默认</option>
       </select>
-    </div>
-    <div class="setting-row">
-      <span class="setting-label">语速</span>
-      <input type="range" id="rate-slider" min="0.5" max="2" step="0.1" value="1" oninput="updateRate(this.value)">
-      <span class="range-val" id="rate-val">1.0</span>
-    </div>
-    <div class="setting-row">
-      <span class="setting-label">音调</span>
-      <input type="range" id="pitch-slider" min="0.5" max="2" step="0.1" value="1.1" oninput="updatePitch(this.value)">
-      <span class="range-val" id="pitch-val">1.1</span>
     </div>
     <div class="setting-row">
       <span class="setting-label">音量</span>
@@ -329,25 +318,32 @@ const DEMO_MODE=!SUPABASE_URL||!SUPABASE_KEY;
 const STORAGE_KEY='whisper_history';
 
 let roomCode='',channel=null;
-let ttsRate=1.0,ttsPitch=1.1,ttsVol=1.0,ttsVoice=null;
+let ttsVol=1.0;
 let muted=false;
 let lastDateLabel='';
+let currentAudio=null;
 
-// voices
+// ElevenLabs voices — load into selector
+const EL_VOICES=[
+  {id:'21m00Tcm4TlvDq8ikWAM',name:'Rachel（女，温柔）'},
+  {id:'AZnzlk1XvdvUeBnXmlld',name:'Domi（女，活泼）'},
+  {id:'EXAVITQu4vr4xnSDxMaL',name:'Bella（女，温暖）'},
+  {id:'ErXwobaYiN019PkySvjV',name:'Antoni（男，沉稳）'},
+  {id:'VR6AewLTigWG4xSOukaG',name:'Arnold（男，有力）'},
+];
+let selectedVoiceId=EL_VOICES[0].id;
+
 function loadVoices(){
-  const voices=window.speechSynthesis.getVoices();
   const sel=document.getElementById('voice-select');
-  sel.innerHTML='<option value="">默认</option>';
-  voices.forEach((v,i)=>{
+  sel.innerHTML='';
+  EL_VOICES.forEach(v=>{
     const opt=document.createElement('option');
-    opt.value=i;
-    opt.textContent=v.name+(v.lang?' ('+v.lang+')':'');
+    opt.value=v.id;opt.textContent=v.name;
     sel.appendChild(opt);
   });
+  sel.value=selectedVoiceId;
 }
-if('speechSynthesis' in window){window.speechSynthesis.onvoiceschanged=loadVoices;loadVoices();}
 
-// mute toggle
 function toggleMute(){
   muted=!muted;
   const btn=document.getElementById('mute-btn');
@@ -357,7 +353,7 @@ function toggleMute(){
     btn.classList.remove('speaking');btn.classList.add('muted');
     label.textContent='已静音';
     icon.innerHTML='<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>';
-    window.speechSynthesis&&window.speechSynthesis.cancel();
+    if(currentAudio){currentAudio.pause();currentAudio=null;}
     hideSpeakingIndicator();
   }else{
     btn.classList.remove('muted');btn.classList.add('speaking');
@@ -501,17 +497,42 @@ function clearHistory(){
   localStorage.removeItem(STORAGE_KEY);renderHistory();showToast('已清空');
 }
 
+// ── CONFIG ──
+const ELEVEN_KEY="sk_09aa7d36f9e462393c42c6af5b0042faf26eed260bf55929";
+const ELEVEN_VOICE="21m00Tcm4TlvDq8ikWAM"; // Rachel, 中文支持好
+
 // tts
-function speakText(text){
-  if(!('speechSynthesis' in window)){showToast('浏览器不支持语音');return;}
-  window.speechSynthesis.cancel();
-  const utter=new SpeechSynthesisUtterance(text);
-  utter.lang='zh-CN';utter.rate=ttsRate;utter.pitch=ttsPitch;utter.volume=ttsVol;
-  if(ttsVoice!==null){const voices=window.speechSynthesis.getVoices();if(voices[ttsVoice])utter.voice=voices[ttsVoice];}
-  else{const zh=window.speechSynthesis.getVoices().find(v=>v.lang.startsWith('zh'));if(zh)utter.voice=zh;}
+async function speakText(text){
+  if(muted)return;
+  // stop any current audio
+  if(currentAudio){currentAudio.pause();currentAudio=null;}
   showSpeakingIndicator();
-  utter.onend=hideSpeakingIndicator;utter.onerror=hideSpeakingIndicator;
-  window.speechSynthesis.speak(utter);
+  try{
+    const res=await fetch('https://api.elevenlabs.io/v1/text-to-speech/'+selectedVoiceId,{
+      method:'POST',
+      headers:{
+        'xi-api-key':ELEVEN_KEY,
+        'Content-Type':'application/json',
+        'Accept':'audio/mpeg'
+      },
+      body:JSON.stringify({
+        text:text,
+        model_id:'eleven_multilingual_v2',
+        voice_settings:{stability:0.5,similarity_boost:0.75}
+      })
+    });
+    if(!res.ok){hideSpeakingIndicator();showToast('朗读失败，检查网络');return;}
+    const blob=await res.blob();
+    const url=URL.createObjectURL(blob);
+    currentAudio=new Audio(url);
+    currentAudio.volume=ttsVol;
+    currentAudio.onended=()=>{hideSpeakingIndicator();URL.revokeObjectURL(url);currentAudio=null;};
+    currentAudio.onerror=()=>{hideSpeakingIndicator();currentAudio=null;};
+    await currentAudio.play();
+  }catch(e){
+    hideSpeakingIndicator();
+    showToast('朗读出错');
+  }
 }
 function showSpeakingIndicator(){
   hideSpeakingIndicator();
@@ -532,12 +553,11 @@ function setStatus(text,dotClass){
 }
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
 function toggleSettings(){document.getElementById('settings-panel').classList.toggle('open');}
-function updateVoice(v){ttsVoice=v===''?null:parseInt(v);}
-function updateRate(v){ttsRate=parseFloat(v);document.getElementById('rate-val').textContent=parseFloat(v).toFixed(1);}
-function updatePitch(v){ttsPitch=parseFloat(v);document.getElementById('pitch-val').textContent=parseFloat(v).toFixed(1);}
-function updateVol(v){ttsVol=parseFloat(v);document.getElementById('vol-val').textContent=parseFloat(v).toFixed(1);}
+function updateVoice(v){selectedVoiceId=v;}
+function updateVol(v){ttsVol=parseFloat(v);document.getElementById('vol-val').textContent=parseFloat(v).toFixed(1);if(currentAudio)currentAudio.volume=ttsVol;}
 
 if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{});}
+loadVoices();
 </script>
 </body>
 </html>
