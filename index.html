@@ -518,17 +518,22 @@ async function speakText(text){
         api_key:ELEVEN_KEY
       })
     });
-    if(!res.ok){hideSpeakingIndicator();showToast('朗读失败，检查网络');return;}
+    if(!res.ok){
+      const errText=await res.text();
+      hideSpeakingIndicator();
+      showToast('失败'+res.status+': '+errText.slice(0,40));
+      return;
+    }
     const blob=await res.blob();
     const url=URL.createObjectURL(blob);
     currentAudio=new Audio(url);
     currentAudio.volume=ttsVol;
     currentAudio.onended=()=>{hideSpeakingIndicator();URL.revokeObjectURL(url);currentAudio=null;};
-    currentAudio.onerror=()=>{hideSpeakingIndicator();currentAudio=null;};
-    await currentAudio.play();
+    currentAudio.onerror=(e)=>{hideSpeakingIndicator();showToast('音频播放失败:'+e.type);currentAudio=null;};
+    try{await currentAudio.play();}catch(pe){hideSpeakingIndicator();showToast('播放错误:'+pe.message.slice(0,30));}
   }catch(e){
     hideSpeakingIndicator();
-    showToast('朗读出错');
+    showToast('出错:'+e.message.slice(0,40));
   }
 }
 function showSpeakingIndicator(){
@@ -548,7 +553,7 @@ function setStatus(text,dotClass){
   const dot=document.getElementById('status-dot');dot.className='status-dot';
   if(dotClass)dot.classList.add(dotClass);
 }
-function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
+function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),6000);}
 function toggleSettings(){document.getElementById('settings-panel').classList.toggle('open');}
 function updateVoice(v){selectedVoiceId=v;}
 function updateVol(v){ttsVol=parseFloat(v);document.getElementById('vol-val').textContent=parseFloat(v).toFixed(1);if(currentAudio)currentAudio.volume=ttsVol;}
