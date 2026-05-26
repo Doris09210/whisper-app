@@ -72,8 +72,9 @@
   .room-label{font-family:'Caveat',cursive;font-size:11px;color:var(--pencil-muted);letter-spacing:.1em;text-transform:uppercase;}
   .room-code-display{font-family:'Caveat',cursive;font-size:20px;font-weight:600;color:var(--pencil);letter-spacing:.2em;}
   .header-right{display:flex;align-items:center;gap:8px;}
-  .role-badge{font-family:'Caveat',cursive;font-size:13px;padding:3px 10px;border:2px dashed var(--pencil);border-radius:20px;color:var(--pencil);}
-  .role-badge.listener{border-color:var(--warm);color:var(--warm);}
+  .role-badge{font-family:'Caveat',cursive;font-size:13px;padding:4px 12px;border:2px solid var(--pencil);border-radius:20px;color:var(--paper);background:var(--pencil);cursor:pointer;transition:all .2s;user-select:none;display:flex;align-items:center;gap:4px;}
+  .role-badge.listener{border-color:var(--warm);background:var(--warm);color:var(--paper);}
+  .switch-hint{font-family:'Caveat',cursive;font-size:11px;color:var(--pencil-muted);font-style:italic;text-align:center;padding:2px 0;}
   .icon-btn{background:transparent;border:2px dashed var(--pencil-muted);border-radius:var(--r);padding:5px 9px;color:var(--pencil-muted);cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;}
   .icon-btn:active{color:var(--pencil);border-color:var(--pencil);}
 
@@ -105,8 +106,9 @@
   .date-divider span{font-family:'Caveat',cursive;font-size:12px;color:var(--pencil-muted);white-space:nowrap;font-style:italic;}
 
   .msg-bubble{max-width:82%;padding:10px 14px;font-size:16px;line-height:1.6;animation:sketch-in .2s ease;font-family:'Noto Serif SC',serif;}
-  .msg-bubble.sent{align-self:flex-end;background:var(--sent-bg);border:2px solid var(--pencil);border-radius:var(--r) var(--r) 2px var(--r);box-shadow:3px 3px 0 rgba(44,44,44,.12);color:var(--pencil);}
-  .msg-bubble.received{align-self:flex-start;background:var(--recv-bg);border:2px dashed var(--warm-border);border-radius:var(--r) var(--r) var(--r) 2px;box-shadow:3px 3px 0 rgba(139,111,92,.1);color:#5a3e2e;}
+  .msg-bubble.sent{align-self:flex-end;background:#2c2c2c;border:2px solid var(--pencil);border-radius:var(--r) var(--r) 2px var(--r);box-shadow:3px 3px 0 rgba(44,44,44,.12);color:#f5f0e8;}
+  .msg-bubble.sent .msg-time{color:rgba(245,240,232,0.5);}
+  .msg-bubble.received{align-self:flex-start;background:var(--warm-bg);border:2px dashed var(--warm-border);border-radius:var(--r) var(--r) var(--r) 2px;box-shadow:3px 3px 0 rgba(139,111,92,.1);color:#5a3e2e;}
   .msg-time{font-family:'Caveat',cursive;font-size:11px;color:var(--pencil-muted);margin-top:4px;text-align:right;font-style:italic;}
   .received .msg-time{text-align:left;color:var(--warm-border);}
 
@@ -260,7 +262,10 @@
           <line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>
         </svg>
       </button>
-      <span class="role-badge" id="role-badge">发送方</span>
+      <span class="role-badge" id="role-badge" onclick="switchRole()" title="点击切换身份">
+        <span id="badge-icon">✍</span>
+        <span id="badge-text">发送方</span>
+      </span>
     </div>
   </div>
 
@@ -380,16 +385,41 @@ if('speechSynthesis' in window){
 }
 
 // ── ROLE / ROOM ──
-function selectRole(r){
-  role=r;
-  document.getElementById('btn-sender').classList.toggle('active',r==='sender');
-  document.getElementById('btn-listener').classList.toggle('active',r==='listener');
-  document.getElementById('enter-btn').classList.toggle('listener-mode',r==='listener');
+function applyRole(){
+  const badge=document.getElementById('role-badge');
+  const icon=document.getElementById('badge-icon');
+  const text=document.getElementById('badge-text');
+  const senderArea=document.getElementById('sender-input-area');
+  const listenerArea=document.getElementById('listener-hint-area');
+  if(role==='listener'){
+    badge.classList.add('listener');
+    icon.textContent='🎧';text.textContent='接收方';
+    senderArea.style.display='none';
+    listenerArea.style.display='block';
+  }else{
+    badge.classList.remove('listener');
+    icon.textContent='✍';text.textContent='发送方';
+    listenerArea.style.display='none';
+    senderArea.style.display='block';
+    setTimeout(()=>document.getElementById('msg-input').focus(),100);
+  }
+}
+function switchRole(){
+  role=role==='sender'?'listener':'sender';
+  applyRole();
+  showToast(role==='listener'?'已切换为接收方 🎧':'已切换为发送方 ✍');
+  window.speechSynthesis&&window.speechSynthesis.cancel();
 }
 function generateCode(){
   const c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let code='';
   for(let i=0;i<4;i++)code+=c[Math.floor(Math.random()*c.length)];
   document.getElementById('room-input').value=code;
+}
+function selectRole(r){
+  role=r;
+  document.getElementById('btn-sender').classList.toggle('active',r==='sender');
+  document.getElementById('btn-listener').classList.toggle('active',r==='listener');
+  document.getElementById('enter-btn').classList.toggle('listener-mode',r==='listener');
 }
 function enterRoom(){
   const input=document.getElementById('room-input').value.trim().toUpperCase();
@@ -397,17 +427,8 @@ function enterRoom(){
   roomCode=input;
   showScreen('chat-screen');
   document.getElementById('header-room-code').textContent=roomCode;
-  const badge=document.getElementById('role-badge');
-  if(role==='listener'){
-    badge.textContent='接收方';badge.classList.add('listener');
-    document.getElementById('listener-hint-area').style.display='block';
-    document.getElementById('empty-hint').textContent='等待对方发消息，将自动朗读…';
-  }else{
-    badge.textContent='发送方';
-    document.getElementById('sender-input-area').style.display='block';
-    document.getElementById('empty-hint').textContent='打字发送，他会听到…';
-    setTimeout(()=>document.getElementById('msg-input').focus(),400);
-  }
+  applyRole();
+  document.getElementById('empty-hint').textContent=role==='listener'?'等待对方发消息，将自动朗读…':'打字发送，他会听到…';
   loadHistoryToChat();
   DEMO_MODE?setupDemo():setupSupabase();
 }
