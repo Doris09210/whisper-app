@@ -84,6 +84,8 @@
   .setting-row{display:flex;align-items:center;justify-content:space-between;gap:12px;}
   .setting-label{font-family:'Caveat',cursive;font-size:14px;color:var(--pencil-light);font-style:italic;min-width:32px;}
   .voice-select{flex:1;background:transparent;border:none;border-bottom:1px dashed var(--pencil-muted);font-family:'Caveat',cursive;font-size:14px;color:var(--pencil);outline:none;padding:2px 0;cursor:pointer;}
+  .test-voice-btn{background:transparent;border:1px dashed var(--pencil-muted);border-radius:var(--r);padding:4px 10px;color:var(--pencil-light);font-family:'Caveat',cursive;font-size:13px;cursor:pointer;white-space:nowrap;}
+  .test-voice-btn:active{transform:translateY(1px);}
   input[type="range"]{-webkit-appearance:none;height:2px;background:var(--pencil-muted);outline:none;width:120px;border-radius:2px;}
   input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;background:var(--warm);cursor:pointer;border-radius:50%;}
   .range-val{font-family:'Caveat',cursive;font-size:14px;color:var(--warm);width:30px;text-align:right;}
@@ -250,6 +252,7 @@
       <span class="setting-label">音色</span>
       <select class="voice-select" id="voice-select" onchange="updateVoice(this.value)">
       </select>
+      <button class="test-voice-btn" onclick="testVoice()">测试</button>
     </div>
     <div class="setting-row">
       <span class="setting-label">音量</span>
@@ -314,33 +317,43 @@
 <script>
 const SUPABASE_URL='https://kaourqoqrdosibnatngf.supabase.co';
 const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imthb3VycW9xcmRvc2libmF0bmdmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk4MTAwMzAsImV4cCI6MjA5NTM4NjAzMH0.6dpG07VENLUonoj4kyFt0ySDiD0gMd0HOGPJ9Q3u-28';
-const DEMO_MODE=!SUPABASE_URL||!SUPABASE_KEY;
+let demoMode=!SUPABASE_URL||!SUPABASE_KEY;
 const STORAGE_KEY='whisper_history';
 
 let roomCode='',channel=null;
 let ttsVol=1.0;
 let muted=false;
 let lastDateLabel='';
-let currentAudio=null;
+let currentUtterance=null;
+let availableVoices=[];
 
-// ElevenLabs voices — load into selector
-const EL_VOICES=[
-  {id:'21m00Tcm4TlvDq8ikWAM',name:'Rachel（女，温柔）'},
-  {id:'AZnzlk1XvdvUeBnXmlld',name:'Domi（女，活泼）'},
-  {id:'EXAVITQu4vr4xnSDxMaL',name:'Bella（女，温暖）'},
-  {id:'ErXwobaYiN019PkySvjV',name:'Antoni（男，沉稳）'},
-  {id:'VR6AewLTigWG4xSOukaG',name:'Arnold（男，有力）'},
-];
-let selectedVoiceId=EL_VOICES[0].id;
+let selectedVoiceId=localStorage.getItem('whisper_voice')||'';
 
 function loadVoices(){
   const sel=document.getElementById('voice-select');
   sel.innerHTML='';
-  EL_VOICES.forEach(v=>{
+  if(!('speechSynthesis' in window)){
     const opt=document.createElement('option');
-    opt.value=v.id;opt.textContent=v.name;
+    opt.value='';opt.textContent='当前浏览器不支持朗读';
     sel.appendChild(opt);
+    sel.disabled=true;
+    return;
+  }
+  availableVoices=window.speechSynthesis.getVoices();
+  const chineseVoices=availableVoices.filter(v=>/^zh|Chinese|Mandarin|普通话|粤语/i.test(v.lang+' '+v.name));
+  const voices=chineseVoices.length?chineseVoices:availableVoices;
+  voices.forEach((v,i)=>{
+    const opt=document.createElement('option');
+    opt.value=v.voiceURI;
+    opt.textContent=v.name+(v.lang?' · '+v.lang:'');
+    sel.appendChild(opt);
+    if(!selectedVoiceId&&i===0)selectedVoiceId=v.voiceURI;
   });
+  if(!voices.length){
+    const opt=document.createElement('option');
+    opt.value='';opt.textContent='使用系统默认声音';
+    sel.appendChild(opt);
+  }
   sel.value=selectedVoiceId;
 }
 
@@ -353,7 +366,7 @@ function toggleMute(){
     btn.classList.remove('speaking');btn.classList.add('muted');
     label.textContent='已静音';
     icon.innerHTML='<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>';
-    if(currentAudio){currentAudio.pause();currentAudio=null;}
+    stopSpeaking();
     hideSpeakingIndicator();
   }else{
     btn.classList.remove('muted');btn.classList.add('speaking');
@@ -375,7 +388,8 @@ function enterRoom(){
   showScreen('chat-screen');
   document.getElementById('header-room-code').textContent=roomCode;
   loadHistoryToChat();
-  DEMO_MODE?setupDemo():setupSupabase();
+  unlockSpeech();
+  demoMode?setupDemo():setupSupabase();
 }
 function goBack(){
   if(channel){try{channel.unsubscribe();}catch(e){}}
@@ -392,7 +406,7 @@ function showHistory(){renderHistory();document.getElementById('history-screen')
 function hideHistory(){document.getElementById('history-screen').classList.add('hidden');}
 
 // connection
-function setupDemo(){document.getElementById('conn-overlay').classList.add('show');setStatus('演示模式','waiting');}
+function setupDemo(){demoMode=true;document.getElementById('conn-overlay').classList.add('show');setStatus('演示模式','waiting');}
 async function setupSupabase(){
   setStatus('连接中…','');
   try{
@@ -400,7 +414,7 @@ async function setupSupabase(){
     const client=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
     channel=client.channel('whisper:'+roomCode,{config:{broadcast:{self:false}}});
     channel.on('broadcast',{event:'msg'},({payload})=>receiveMessage(payload.text))
-      .subscribe(s=>{if(s==='SUBSCRIBED')setStatus('已连接','online');});
+      .subscribe(s=>{if(s==='SUBSCRIBED'){demoMode=false;setStatus('已连接','online');}});
   }catch(e){setStatus('连接失败','');showToast('连接出错');setupDemo();}
 }
 function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=rej;document.head.appendChild(s);});}
@@ -413,7 +427,7 @@ function sendMessage(){
   addBubble(text,'sent',ts);
   saveMessage(text,'sent',ts);
   input.value='';autoResize(input);
-  if(DEMO_MODE){setTimeout(()=>receiveMessage(text),400);}
+  if(demoMode){setTimeout(()=>receiveMessage(text),400);}
   else if(channel){channel.send({type:'broadcast',event:'msg',payload:{text}});}
 }
 function receiveMessage(text){
@@ -497,44 +511,49 @@ function clearHistory(){
   localStorage.removeItem(STORAGE_KEY);renderHistory();showToast('已清空');
 }
 
-// ── CONFIG ──
-const ELEVEN_KEY="sk_25859f2e7f1306ea2b701474a4d897aa194b8ccd13dc6d8e";
-const ELEVEN_VOICE="21m00Tcm4TlvDq8ikWAM"; // Rachel, 中文支持好
+function unlockSpeech(){
+  if(!('speechSynthesis' in window))return;
+  window.speechSynthesis.resume();
+}
 
-// tts
-const PROXY_URL='https://whisper.feiwan0921.workers.dev';
+function stopSpeaking(){
+  if(!('speechSynthesis' in window))return;
+  window.speechSynthesis.cancel();
+  currentUtterance=null;
+}
 
-async function speakText(text){
+function getSelectedVoice(){
+  return availableVoices.find(v=>v.voiceURI===selectedVoiceId)||null;
+}
+
+function speakText(text){
   if(muted)return;
-  if(currentAudio){currentAudio.pause();currentAudio=null;}
-  showSpeakingIndicator();
-  try{
-    const res=await fetch(PROXY_URL,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        text:text,
-        voice_id:selectedVoiceId,
-        api_key:ELEVEN_KEY
-      })
-    });
-    if(!res.ok){
-      const errText=await res.text();
-      hideSpeakingIndicator();
-      showToast('失败'+res.status+': '+errText.slice(0,40));
-      return;
-    }
-    const blob=await res.blob();
-    const url=URL.createObjectURL(blob);
-    currentAudio=new Audio(url);
-    currentAudio.volume=ttsVol;
-    currentAudio.onended=()=>{hideSpeakingIndicator();URL.revokeObjectURL(url);currentAudio=null;};
-    currentAudio.onerror=(e)=>{hideSpeakingIndicator();showToast('音频播放失败:'+e.type);currentAudio=null;};
-    try{await currentAudio.play();}catch(pe){hideSpeakingIndicator();showToast('播放错误:'+pe.message.slice(0,30));}
-  }catch(e){
-    hideSpeakingIndicator();
-    showToast('出错:'+e.message.slice(0,40));
+  if(!('speechSynthesis' in window)){
+    showToast('当前浏览器不支持朗读');
+    return;
   }
+  stopSpeaking();
+  showSpeakingIndicator();
+  const utter=new SpeechSynthesisUtterance(text);
+  const voice=getSelectedVoice();
+  if(voice){
+    utter.voice=voice;
+    utter.lang=voice.lang||'zh-CN';
+  }else{
+    utter.lang='zh-CN';
+  }
+  utter.volume=ttsVol;
+  utter.rate=0.95;
+  utter.pitch=1;
+  utter.onend=()=>{hideSpeakingIndicator();currentUtterance=null;};
+  utter.onerror=()=>{hideSpeakingIndicator();currentUtterance=null;showToast('朗读失败，请点“测试”后再试');};
+  currentUtterance=utter;
+  window.speechSynthesis.speak(utter);
+}
+
+function testVoice(){
+  unlockSpeech();
+  speakText('这是一条朗读测试。收到消息时，我会把文字读给你听。');
 }
 function showSpeakingIndicator(){
   hideSpeakingIndicator();
@@ -555,11 +574,14 @@ function setStatus(text,dotClass){
 }
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),6000);}
 function toggleSettings(){document.getElementById('settings-panel').classList.toggle('open');}
-function updateVoice(v){selectedVoiceId=v;}
-function updateVol(v){ttsVol=parseFloat(v);document.getElementById('vol-val').textContent=parseFloat(v).toFixed(1);if(currentAudio)currentAudio.volume=ttsVol;}
+function updateVoice(v){selectedVoiceId=v;localStorage.setItem('whisper_voice',v);}
+function updateVol(v){ttsVol=parseFloat(v);document.getElementById('vol-val').textContent=parseFloat(v).toFixed(1);}
 
 if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{});}
 loadVoices();
+if('speechSynthesis' in window){
+  window.speechSynthesis.onvoiceschanged=loadVoices;
+}
 </script>
 </body>
 </html>
