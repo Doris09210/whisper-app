@@ -259,6 +259,11 @@
       <input type="range" id="vol-slider" min="0.1" max="1" step="0.1" value="1" oninput="updateVol(this.value)">
       <span class="range-val" id="vol-val">1.0</span>
     </div>
+    <div class="setting-row">
+      <span class="setting-label">语速</span>
+      <input type="range" id="rate-slider" min="0.6" max="1.5" step="0.1" value="1" oninput="updateRate(this.value)">
+      <span class="range-val" id="rate-val">1.0</span>
+    </div>
   </div>
 
   <div class="status-bar">
@@ -321,7 +326,8 @@ let demoMode=!SUPABASE_URL||!SUPABASE_KEY;
 const STORAGE_KEY='whisper_history';
 
 let roomCode='',channel=null;
-let ttsVol=1.0;
+let ttsVol=parseFloat(localStorage.getItem('whisper_volume')||'1');
+let ttsRate=parseFloat(localStorage.getItem('whisper_rate')||'1');
 let muted=false;
 let lastDateLabel='';
 let currentUtterance=null;
@@ -543,7 +549,7 @@ function speakText(text){
     utter.lang='zh-CN';
   }
   utter.volume=ttsVol;
-  utter.rate=0.95;
+  utter.rate=ttsRate;
   utter.pitch=1;
   utter.onend=()=>{hideSpeakingIndicator();currentUtterance=null;};
   utter.onerror=()=>{hideSpeakingIndicator();currentUtterance=null;showToast('朗读失败，请点“测试”后再试');};
@@ -575,9 +581,17 @@ function setStatus(text,dotClass){
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),6000);}
 function toggleSettings(){document.getElementById('settings-panel').classList.toggle('open');}
 function updateVoice(v){selectedVoiceId=v;localStorage.setItem('whisper_voice',v);}
-function updateVol(v){ttsVol=parseFloat(v);document.getElementById('vol-val').textContent=parseFloat(v).toFixed(1);}
+function updateVol(v){ttsVol=parseFloat(v);localStorage.setItem('whisper_volume',ttsVol);document.getElementById('vol-val').textContent=ttsVol.toFixed(1);}
+function updateRate(v){ttsRate=parseFloat(v);localStorage.setItem('whisper_rate',ttsRate);document.getElementById('rate-val').textContent=ttsRate.toFixed(1);}
+function initTtsSettings(){
+  const vol=document.getElementById('vol-slider');
+  const rate=document.getElementById('rate-slider');
+  vol.value=ttsVol;document.getElementById('vol-val').textContent=ttsVol.toFixed(1);
+  rate.value=ttsRate;document.getElementById('rate-val').textContent=ttsRate.toFixed(1);
+}
 
 if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{});}
+initTtsSettings();
 loadVoices();
 if('speechSynthesis' in window){
   window.speechSynthesis.onvoiceschanged=loadVoices;
