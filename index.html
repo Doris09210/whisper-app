@@ -276,8 +276,8 @@
     </div>
     <div class="setting-row">
       <span class="setting-label">语速</span>
-      <input type="range" id="rate-slider" min="0.6" max="1.5" step="0.1" value="1" oninput="updateRate(this.value)">
-      <span class="range-val" id="rate-val">1.0</span>
+      <input type="range" id="rate-slider" min="0.6" max="1.5" step="0.1" value="0.9" oninput="updateRate(this.value)">
+      <span class="range-val" id="rate-val">0.9</span>
     </div>
   </div>
 
@@ -340,16 +340,22 @@ const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSI
 let demoMode=!SUPABASE_URL||!SUPABASE_KEY;
 const STORAGE_KEY='whisper_history';
 const DEFAULT_ADVANCED_TTS_URL='';
+const CLIENT_ID_KEY='whisper_client_id';
 
 let roomCode='',channel=null;
 let ttsVol=parseFloat(localStorage.getItem('whisper_volume')||'1');
-let ttsRate=parseFloat(localStorage.getItem('whisper_rate')||'1');
+let ttsRate=parseFloat(localStorage.getItem('whisper_rate')||'0.9');
 let muted=false;
 let lastDateLabel='';
 let currentUtterance=null;
 let currentAudio=null;
 let availableVoices=[];
 
+let clientId=localStorage.getItem(CLIENT_ID_KEY);
+if(!clientId){
+  clientId=(window.crypto&&window.crypto.randomUUID)?window.crypto.randomUUID():(Date.now()+'-'+Math.random().toString(16).slice(2));
+  localStorage.setItem(CLIENT_ID_KEY,clientId);
+}
 let selectedVoiceId=localStorage.getItem('whisper_voice')||'';
 let ttsMode=localStorage.getItem('whisper_tts_mode')||'system';
 let advancedTtsUrl=localStorage.getItem('whisper_advanced_tts_url')||DEFAULT_ADVANCED_TTS_URL;
@@ -438,7 +444,7 @@ async function setupSupabase(){
     await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js');
     const client=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
     channel=client.channel('whisper:'+roomCode,{config:{broadcast:{self:false}}});
-    channel.on('broadcast',{event:'msg'},({payload})=>receiveMessage(payload.text))
+    channel.on('broadcast',{event:'msg'},({payload})=>receiveMessage(payload))
       .subscribe(s=>{if(s==='SUBSCRIBED'){demoMode=false;setStatus('已连接','online');}});
   }catch(e){setStatus('连接失败','');showToast('连接出错');setupDemo();}
 }
@@ -452,12 +458,19 @@ function sendMessage(){
   addBubble(text,'sent',ts);
   saveMessage(text,'sent',ts);
   input.value='';autoResize(input);
-  if(demoMode){setTimeout(()=>receiveMessage(text),400);}
-  else if(channel){channel.send({type:'broadcast',event:'msg',payload:{text}});}
+  if(demoMode){
+    showToast('演示模式下不会朗读自己发送的消息');
+  }else if(channel){
+    channel.send({type:'broadcast',event:'msg',payload:{text,clientId,ts}});
+  }
 }
-function receiveMessage(text){
+function receiveMessage(payload){
+  const data=typeof payload==='string'?{text:payload}:payload||{};
+  if(data.clientId&&data.clientId===clientId)return;
+  const text=(data.text||'').trim();
+  if(!text)return;
   removeEmpty();
-  const ts=Date.now();
+  const ts=data.ts||Date.now();
   addBubble(text,'received',ts);
   saveMessage(text,'received',ts);
   if(!muted)speakText(text);
@@ -556,8 +569,15 @@ function getSelectedVoice(){
 
 function speakText(text){
   if(muted)return;
-  if(ttsMode==='advanced')return speakAdvancedText(text);
-  return speakSystemText(text);
+  const speakable=prepareSpeechText(text);
+  if(ttsMode==='advanced')return speakAdvancedText(speakable);
+  return speakSystemText(speakable);
+}
+
+function prepareSpeechText(text){
+  let s=String(text||'').trim().replace(/\s+/g,' ');
+  if(!/[。！？!?.,，；;：:]$/.test(s))s+='。';
+  return s;
 }
 
 function speakSystemText(text){
@@ -577,7 +597,7 @@ function speakSystemText(text){
   }
   utter.volume=ttsVol;
   utter.rate=ttsRate;
-  utter.pitch=1;
+  utter.pitch=1.03;
   utter.onend=()=>{hideSpeakingIndicator();currentUtterance=null;};
   utter.onerror=()=>{hideSpeakingIndicator();currentUtterance=null;showToast('朗读失败，请点“测试”后再试');};
   currentUtterance=utter;
