@@ -316,8 +316,8 @@
         <polyline points="15 18 9 12 15 6"/>
       </svg>
     </button>
-    <div class="history-title">鑱婂ぉ璁板綍</div>
-    <button class="clear-btn" onclick="clearHistory()">娓呯┖</button>
+    <div class="history-title">聊天记录</div>
+    <button class="clear-btn" onclick="clearHistory()">清空</button>
   </div>
   <div class="history-list" id="history-list"></div>
 </div>
@@ -350,6 +350,7 @@ let lastDateLabel='';
 let currentUtterance=null;
 let currentAudio=null;
 let availableVoices=[];
+const seenMessageIds=new Set();
 
 let clientId=localStorage.getItem(CLIENT_ID_KEY);
 if(!clientId){
@@ -455,24 +456,29 @@ function sendMessage(){
   const input=document.getElementById('msg-input');
   const text=input.value.trim();if(!text)return;
   const ts=Date.now();
+  const messageId=createMessageId();
+  seenMessageIds.add(messageId);
   addBubble(text,'sent',ts);
-  saveMessage(text,'sent',ts);
+  saveMessage(text,'sent',ts,messageId);
   input.value='';autoResize(input);
   if(demoMode){
     showToast('演示模式下不会朗读自己发送的消息');
   }else if(channel){
-    channel.send({type:'broadcast',event:'msg',payload:{text,clientId,ts}});
+    channel.send({type:'broadcast',event:'msg',payload:{text,clientId,messageId,ts}});
   }
 }
 function receiveMessage(payload){
   const data=typeof payload==='string'?{text:payload}:payload||{};
   if(data.clientId&&data.clientId===clientId)return;
+  const messageId=data.messageId||createMessageId();
+  if(seenMessageIds.has(messageId))return;
+  seenMessageIds.add(messageId);
   const text=(data.text||'').trim();
   if(!text)return;
   removeEmpty();
   const ts=data.ts||Date.now();
   addBubble(text,'received',ts);
-  saveMessage(text,'received',ts);
+  saveMessage(text,'received',ts,messageId);
   if(!muted)speakText(text);
 }
 
@@ -500,12 +506,15 @@ function addBubble(text,type,ts){
 }
 function removeEmpty(){const e=document.getElementById('empty-state');if(e)e.remove();}
 function escapeHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function createMessageId(){
+  return (window.crypto&&window.crypto.randomUUID)?window.crypto.randomUUID():(Date.now()+'-'+Math.random().toString(16).slice(2));
+}
 
 // storage
-function saveMessage(text,type,ts){
+function saveMessage(text,type,ts,messageId){
   try{
     const all=JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');
-    all.push({text,type,ts,room:roomCode});
+    all.push({text,type,ts,room:roomCode,messageId});
     if(all.length>500)all.splice(0,all.length-500);
     localStorage.setItem(STORAGE_KEY,JSON.stringify(all));
   }catch(e){}
@@ -515,7 +524,7 @@ function loadHistoryToChat(){
     const all=JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');
     const mine=all.filter(m=>m.room===roomCode);
     if(!mine.length)return;
-    removeEmpty();mine.forEach(m=>addBubble(m.text,m.type,m.ts));
+    removeEmpty();mine.forEach(m=>{if(m.messageId)seenMessageIds.add(m.messageId);addBubble(m.text,m.type,m.ts);});
   }catch(e){}
 }
 function renderHistory(){
